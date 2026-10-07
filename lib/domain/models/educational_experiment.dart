@@ -2,7 +2,10 @@
 enum ExperimentType {
   rpmVariation,
   ambientTemperatureVariation,
-  expansionValveThrottling;
+  expansionValveThrottling,
+  condenserAirflowReduction,
+  thermalLoadIncrease,
+  severeExpansionThrottling;
 }
 
 enum ExperimentPhase {
@@ -101,6 +104,60 @@ class EducationalExperiment {
           correctOptionIndex: 2,
           physicalExplanation:
               'Al estrangular la válvula entra muy poco caudal líquido al evaporador. Este líquido se evapora en los primeros metros de la batería, y todo el tramo restante de tubos solo transporta vapor que continúa absorbiendo calor del aire. El vapor se sobrecalienta excesivamente (alto superheat), reduciendo la potencia frigorífica.',
+        ),
+        const EducationalExperiment(
+          type: ExperimentType.condenserAirflowReduction,
+          title: 'Práctica 4: Reducción del Caudal de Aire en el Condensador',
+          parameterName: 'Ensuciamiento Condensador',
+          unitSymbol: '%',
+          baselineValue: 0.0,
+          perturbedValue: 80.0,
+          hypothesisQuestion:
+              'Si el condensador se ensucia severamente o el ventilador pierde caudal, ¿qué le ocurrirá a la presión de condensación y al trabajo del compresor?',
+          quizOptions: [
+            'A) La presión de condensación se disparará al perder capacidad de disipación, obligando al compresor a consumir más energía.',
+            'B) El compresor se detendrá de inmediato porque el condensador genera vacío.',
+            'C) La presión de alta bajará porque el aire ya no roba calor.',
+          ],
+          correctOptionIndex: 0,
+          physicalExplanation:
+              'Al reducir el coeficiente de transferencia UA o el flujo de aire, el salto térmico requerido para disipar el calor liberado se multiplica. La presión y temperatura de saturación de condensación aumentan bruscamente, elevando la relación de compresión y el riesgo de disparo por presostato de alta.',
+        ),
+        const EducationalExperiment(
+          type: ExperimentType.thermalLoadIncrease,
+          title: 'Práctica 5: Incremento de la Carga Térmica en el Recinto',
+          parameterName: 'Carga Interna Recinto',
+          unitSymbol: 'W',
+          baselineValue: 250.0,
+          perturbedValue: 2500.0,
+          hypothesisQuestion:
+              'Si se introducen de golpe 2500 W de producto caliente en la cámara, ¿cómo responderán la presión de evaporación y el abatimiento de temperatura?',
+          quizOptions: [
+            'A) La presión de baja aumentará inmediatamente por mayor transferencia de calor, y el tiempo de enfriamiento se alargará.',
+            'B) La presión de baja caerá a cero porque el calor extra agota el gas.',
+            'C) El compresor disminuirá sus RPM para proteger la cámara.',
+          ],
+          correctOptionIndex: 0,
+          physicalExplanation:
+              'El mayor flujo de calor desde el recinto hacia los tubos del evaporador intensifica la ebullición del refrigerante, elevando la presión de evaporación P₀ y la densidad del vapor aspirado. La instalación absorbe más potencia pero la cámara tarda más tiempo en alcanzar la consigna.',
+        ),
+        const EducationalExperiment(
+          type: ExperimentType.severeExpansionThrottling,
+          title: 'Práctica 6: Estrangulamiento Severo de la TXV (Falta de Alimentación)',
+          parameterName: 'Apertura TXV',
+          unitSymbol: '%',
+          baselineValue: 45.0,
+          perturbedValue: 10.0,
+          hypothesisQuestion:
+              'Si la válvula de expansión se estrangula al 10%, ¿qué ocurrirá con el caudal másico y el recalentamiento?',
+          quizOptions: [
+            'A) El caudal disminuye drásticamente, la presión de evaporación cae en picado y el recalentamiento se dispara.',
+            'B) El evaporador se inunda de líquido y el recalentamiento cae a 0 K.',
+            'C) La instalación genera el doble de potencia frigorífica.',
+          ],
+          correctOptionIndex: 0,
+          physicalExplanation:
+              'Un orificio fuertemente estrangulado restringe el caudal másico por debajo de la capacidad de aspiración del compresor. La presión de evaporación cae hacia el vacío, la batería se desnutre y el gas se recalienta excesivamente antes de llegar al compresor.',
         ),
       ];
 

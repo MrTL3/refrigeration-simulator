@@ -186,8 +186,13 @@ class SimulationEngine extends ChangeNotifier {
       case ExperimentType.ambientTemperatureVariation:
         setAmbientTemperature(experiment.baselineValue + 273.15);
       case ExperimentType.expansionValveThrottling:
+      case ExperimentType.severeExpansionThrottling:
         setTxvAutomatic(false);
         setValveOpening(experiment.baselineValue);
+      case ExperimentType.condenserAirflowReduction:
+        setCondenserFouling(experiment.baselineValue / 100.0);
+      case ExperimentType.thermalLoadIncrease:
+        setInternalHeatLoad(experiment.baselineValue);
     }
     start();
     notifyListeners();
@@ -203,7 +208,12 @@ class SimulationEngine extends ChangeNotifier {
       case ExperimentType.ambientTemperatureVariation:
         setAmbientTemperature(exp.perturbedValue + 273.15);
       case ExperimentType.expansionValveThrottling:
+      case ExperimentType.severeExpansionThrottling:
         setValveOpening(exp.perturbedValue);
+      case ExperimentType.condenserAirflowReduction:
+        setCondenserFouling(exp.perturbedValue / 100.0);
+      case ExperimentType.thermalLoadIncrease:
+        setInternalHeatLoad(exp.perturbedValue);
     }
     _activeExperiment = exp.copyWith(phase: ExperimentPhase.observingTransient);
     notifyListeners();

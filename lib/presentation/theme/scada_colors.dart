@@ -22,6 +22,11 @@ abstract class ScadaColors {
   static const Color dangerRed = Color(0xFFEF4444);
   static const Color infoBlue = Color(0xFF38BDF8);
 
+  // Aliases de diseño y coherencia visual
+  static const Color primary = infoBlue;
+  static const Color cyanAccent = lowPressureTwoPhase;
+  static const Color lowPressureGas = lowPressureSuction;
+
   // Textos y contrastes
   static const Color textPrimary = Color(0xFFF8FAFC);
   static const Color textSecondary = Color(0xFF94A3B8);
