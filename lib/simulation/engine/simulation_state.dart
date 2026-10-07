@@ -1,13 +1,20 @@
+import '../../domain/models/air_flow_model.dart';
 import '../../domain/models/circuit.dart';
 import '../../domain/models/cold_room_model.dart';
+import '../../domain/models/electrical_model.dart';
+import '../../domain/models/pipe_segment_state.dart';
 import '../../domain/models/thermodynamic_state.dart';
 import '../../domain/models/thermostat_model.dart';
 import '../../domain/models/transient_metrics.dart';
+import '../../domain/models/vacuum_model.dart';
 import '../solver/circuit_topology_validator.dart';
 import '../thermodynamics/refrigerant_model.dart';
 import '../thermodynamics/r134a_model.dart';
 
 /// Estado global inmutable de la simulación frigorífica dinámica en un instante de tiempo t.
+/// EL SOLVER FÍSICO ES LA ÚNICA FUENTE DE VERDAD:
+/// Todos los instrumentos, esquemas visuales, partículas de flujo y animaciones
+/// consumen exclusivamente los datos calculados en esta estructura.
 class SimulationState {
   final double timeSeconds;
   final bool isRunning;
@@ -43,6 +50,17 @@ class SimulationState {
   final double compressorPowerWatts;
   final double electricalPowerWatts;
   final double cop;
+
+  // Modelos de subsistemas físicos enriquecidos
+  final CompressorElectricalState electricalState;
+  final HeatExchangerAirFlowState condenserAirFlow;
+  final HeatExchangerAirFlowState evaporatorAirFlow;
+  final Map<String, PipeSegmentState> pipeStates;
+  final VacuumState vacuumState;
+
+  // Consignas o perturbaciones para inyección de averías
+  final double condenserFanSpeedOverride;
+  final double evaporatorFanSpeedOverride;
 
   // Tendencias y derivadas temporales
   final MetricTrend trendPEvap;
@@ -80,6 +98,13 @@ class SimulationState {
     required this.compressorPowerWatts,
     required this.electricalPowerWatts,
     required this.cop,
+    required this.electricalState,
+    required this.condenserAirFlow,
+    required this.evaporatorAirFlow,
+    required this.pipeStates,
+    required this.vacuumState,
+    this.condenserFanSpeedOverride = 1.0,
+    this.evaporatorFanSpeedOverride = 1.0,
     required this.trendPEvap,
     required this.trendPCond,
     required this.trendTRoom,
@@ -97,6 +122,19 @@ class SimulationState {
 
     final tAmb = defaultCircuit.condenser?.ambientTemperatureKelvin ?? 298.15;
     final pEqualized = ref.saturationPressure(tAmb);
+
+    // Inicialización física de tramos de tubería con caudal nulo
+    final initialPipes = <String, PipeSegmentState>{};
+    for (final pipe in defaultCircuit.pipes) {
+      initialPipes[pipe.id] = PipeSegmentState.calculate(
+        id: pipe.id,
+        name: pipe.name,
+        state: zeroState,
+        massFlowKgPerSec: 0.0,
+        innerDiameterMm: pipe.innerDiameterMm,
+        lengthMeters: pipe.lengthMeters,
+      );
+    }
 
     return SimulationState(
       timeSeconds: 0.0,
@@ -125,6 +163,21 @@ class SimulationState {
       compressorPowerWatts: 0.0,
       electricalPowerWatts: 0.0,
       cop: 0.0,
+      electricalState: CompressorElectricalState.off(),
+      condenserAirFlow: HeatExchangerAirFlowState.calculateCondenser(
+        heatRejectionWatts: 0.0,
+        ambientTempK: tAmb,
+        fanSpeedFraction: 0.0,
+      ),
+      evaporatorAirFlow: HeatExchangerAirFlowState.calculateEvaporator(
+        coolingCapacityWatts: 0.0,
+        roomAirTempK: initialColdRoom.temperatureKelvin,
+        fanSpeedFraction: 0.0,
+      ),
+      pipeStates: initialPipes,
+      vacuumState: VacuumState.initial(),
+      condenserFanSpeedOverride: 1.0,
+      evaporatorFanSpeedOverride: 1.0,
       trendPEvap: MetricTrend.initial(pEqualized),
       trendPCond: MetricTrend.initial(pEqualized),
       trendTRoom: MetricTrend.initial(initialColdRoom.temperatureKelvin),
@@ -132,6 +185,12 @@ class SimulationState {
       lastSampleTime: null,
     );
   }
+
+  // Getters de acceso rápido y seguro a los tramos de tubería
+  PipeSegmentState? get pipeDischarge => pipeStates['pipe_discharge'];
+  PipeSegmentState? get pipeLiquid => pipeStates['pipe_liquid'];
+  PipeSegmentState? get pipeExpansion => pipeStates['pipe_expansion'];
+  PipeSegmentState? get pipeSuction => pipeStates['pipe_suction'];
 
   SimulationState copyWith({
     double? timeSeconds,
@@ -160,6 +219,13 @@ class SimulationState {
     double? compressorPowerWatts,
     double? electricalPowerWatts,
     double? cop,
+    CompressorElectricalState? electricalState,
+    HeatExchangerAirFlowState? condenserAirFlow,
+    HeatExchangerAirFlowState? evaporatorAirFlow,
+    Map<String, PipeSegmentState>? pipeStates,
+    VacuumState? vacuumState,
+    double? condenserFanSpeedOverride,
+    double? evaporatorFanSpeedOverride,
     MetricTrend? trendPEvap,
     MetricTrend? trendPCond,
     MetricTrend? trendTRoom,
@@ -193,6 +259,13 @@ class SimulationState {
       compressorPowerWatts: compressorPowerWatts ?? this.compressorPowerWatts,
       electricalPowerWatts: electricalPowerWatts ?? this.electricalPowerWatts,
       cop: cop ?? this.cop,
+      electricalState: electricalState ?? this.electricalState,
+      condenserAirFlow: condenserAirFlow ?? this.condenserAirFlow,
+      evaporatorAirFlow: evaporatorAirFlow ?? this.evaporatorAirFlow,
+      pipeStates: pipeStates ?? this.pipeStates,
+      vacuumState: vacuumState ?? this.vacuumState,
+      condenserFanSpeedOverride: condenserFanSpeedOverride ?? this.condenserFanSpeedOverride,
+      evaporatorFanSpeedOverride: evaporatorFanSpeedOverride ?? this.evaporatorFanSpeedOverride,
       trendPEvap: trendPEvap ?? this.trendPEvap,
       trendPCond: trendPCond ?? this.trendPCond,
       trendTRoom: trendTRoom ?? this.trendTRoom,

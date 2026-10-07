@@ -127,6 +127,8 @@ class SimulationEngine extends ChangeNotifier {
     if (cond == null) return;
     final updatedCond = cond.copyWith(fanOperational: operational);
     _updateComponentInCircuit(updatedCond);
+    _state = _state.copyWith(condenserFanSpeedOverride: operational ? 1.0 : 0.0);
+    notifyListeners();
   }
 
   void toggleEvaporatorFan(bool operational) {
@@ -134,6 +136,24 @@ class SimulationEngine extends ChangeNotifier {
     if (evap == null) return;
     final updatedEvap = evap.copyWith(fanOperational: operational);
     _updateComponentInCircuit(updatedEvap);
+    _state = _state.copyWith(evaporatorFanSpeedOverride: operational ? 1.0 : 0.0);
+    notifyListeners();
+  }
+
+  void setCondenserFanSpeedOverride(double fraction) {
+    _state = _state.copyWith(condenserFanSpeedOverride: fraction.clamp(0.0, 1.2));
+    notifyListeners();
+  }
+
+  void setEvaporatorFanSpeedOverride(double fraction) {
+    _state = _state.copyWith(evaporatorFanSpeedOverride: fraction.clamp(0.0, 1.2));
+    notifyListeners();
+  }
+
+  void stepVacuum(double dt, {bool pumpOn = true}) {
+    final updatedVac = _state.vacuumState.integrateStep(dt, pumpOn: pumpOn);
+    _state = _state.copyWith(vacuumState: updatedVac);
+    notifyListeners();
   }
 
   void setCondenserFouling(double fouling) {

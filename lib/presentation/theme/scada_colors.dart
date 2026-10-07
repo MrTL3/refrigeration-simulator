@@ -20,6 +20,7 @@ abstract class ScadaColors {
   static const Color runningGreen = Color(0xFF10B981);
   static const Color warningAmber = Color(0xFFF59E0B);
   static const Color dangerRed = Color(0xFFEF4444);
+  static const Color errorRed = dangerRed;
   static const Color infoBlue = Color(0xFF38BDF8);
 
   // Aliases de diseño y coherencia visual

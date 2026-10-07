@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import '../../core/units/pressure_unit.dart';
 import '../../core/units/temperature_unit.dart';
 import '../../domain/components/base_component.dart';
+import '../../domain/models/simulation_level.dart';
 import '../../education/virtual_teacher/virtual_teacher_service.dart';
 import '../../simulation/engine/simulation_engine.dart';
 import '../../simulation/engine/simulation_state.dart';
+import '../../visualization/realistic_plant_canvas.dart';
 import '../theme/scada_colors.dart';
 import '../widgets/component_inspector_modal.dart';
+import '../widgets/instruments/instrument_workbench_panel.dart';
 import '../widgets/ph_diagram_widget.dart';
 import '../widgets/pid_canvas.dart';
 import '../widgets/simulation_control_panel.dart';
@@ -17,7 +20,9 @@ import '../widgets/ts_diagram_widget.dart';
 
 /// Modo de visualización central de la planta
 enum CentralViewMode {
+  realistic25D('Planta Física 2.5D', Icons.precision_manufacturing_outlined),
   pid('Sinóptico P&ID', Icons.account_tree_outlined),
+  instruments('SCADA Instrumentos', Icons.speed_outlined),
   phDiagram('Diagrama P-h (Mollier)', Icons.show_chart_rounded),
   tsDiagram('Diagrama T-s', Icons.multiline_chart_rounded);
 
@@ -49,7 +54,9 @@ class SimulatorScreen extends StatefulWidget {
 
 class _SimulatorScreenState extends State<SimulatorScreen> {
   BaseComponent? _selectedComponent;
-  CentralViewMode _viewMode = CentralViewMode.pid;
+  CentralViewMode _viewMode = CentralViewMode.realistic25D;
+  SimulationInformationLevel _informationLevel = SimulationInformationLevel.level3Technician;
+  VisualLayerToggles _layerToggles = const VisualLayerToggles();
 
   @override
   void initState() {
@@ -83,7 +90,7 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
     if (target != null) {
       setState(() {
         _selectedComponent = target;
-        _viewMode = CentralViewMode.pid;
+        _viewMode = CentralViewMode.realistic25D;
       });
       _openExplainer(target);
     }
@@ -256,7 +263,11 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
 
                 // Lienzo central interactivo (P&ID, P-h Mollier o T-s)
                 Container(
-                  height: isTallScreen ? null : (_viewMode == CentralViewMode.pid ? 380.0 : 520.0),
+                  height: isTallScreen
+                      ? null
+                      : (_viewMode == CentralViewMode.pid
+                          ? 380.0
+                          : (_viewMode == CentralViewMode.realistic25D ? 480.0 : 520.0)),
                   decoration: BoxDecoration(
                     color: ScadaColors.surface,
                     borderRadius: BorderRadius.circular(12),
@@ -409,6 +420,33 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
 
   Widget _buildCentralContent(SimulationState state, BaseComponent? selectedComp) {
     switch (_viewMode) {
+      case CentralViewMode.realistic25D:
+        return Stack(
+          children: [
+            RealisticPlantCanvas(
+              state: state,
+              informationLevel: _informationLevel,
+              layerToggles: _layerToggles,
+              selectedComponent: selectedComp,
+              onComponentSelected: (comp) {
+                setState(() => _selectedComponent = comp);
+                _openExplainer(comp);
+              },
+              onInspectWhy: (title) {
+                if (selectedComp != null) {
+                  _openExplainer(selectedComp);
+                }
+              },
+            ),
+            Positioned(
+              left: 8,
+              top: 8,
+              right: 8,
+              child: _buildRealisticControlBar(state),
+            ),
+          ],
+        );
+
       case CentralViewMode.pid:
         return Stack(
           children: [
@@ -449,6 +487,11 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
           ],
         );
 
+      case CentralViewMode.instruments:
+        return SingleChildScrollView(
+          child: InstrumentWorkbenchPanel(engine: widget.engine),
+        );
+
       case CentralViewMode.phDiagram:
         return PhDiagramWidget(
           state: state,
@@ -464,6 +507,169 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
           onHighlightComponent: _handleComponentHighlight,
         );
     }
+  }
+
+  Widget _buildRealisticControlBar(SimulationState state) {
+    final condFanOff = state.condenserFanSpeedOverride == 0.0 || (state.circuit.condenser?.fanOperational == false);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: ScadaColors.surfaceCard.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: ScadaColors.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Selector de Nivel Informativo
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: ScadaColors.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: ScadaColors.border),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<SimulationInformationLevel>(
+                  value: _informationLevel,
+                  isDense: true,
+                  dropdownColor: ScadaColors.surfaceCard,
+                  items: SimulationInformationLevel.values.map((level) {
+                    return DropdownMenuItem(
+                      value: level,
+                      child: Text(
+                        level.title,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: ScadaColors.primary,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (newLevel) {
+                    if (newLevel != null) {
+                      setState(() => _informationLevel = newLevel);
+                    }
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Capas visuales (Filtros SCADA)
+            _buildLayerChip(
+              label: 'FLUJO',
+              icon: Icons.visibility,
+              isActive: _layerToggles.showFlow,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showFlow: !_layerToggles.showFlow)),
+            ),
+            const SizedBox(width: 4),
+            _buildLayerChip(
+              label: 'CALOR',
+              icon: Icons.local_fire_department,
+              isActive: _layerToggles.showHeatExchange,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showHeatExchange: !_layerToggles.showHeatExchange)),
+            ),
+            const SizedBox(width: 4),
+            _buildLayerChip(
+              label: 'PRESIÓN',
+              icon: Icons.speed,
+              isActive: _layerToggles.showPressureZones,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showPressureZones: !_layerToggles.showPressureZones)),
+            ),
+            const SizedBox(width: 4),
+            _buildLayerChip(
+              label: 'TEMP',
+              icon: Icons.thermostat,
+              isActive: _layerToggles.showTemperatures,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showTemperatures: !_layerToggles.showTemperatures)),
+            ),
+            const SizedBox(width: 4),
+            _buildLayerChip(
+              label: 'MOTOR',
+              icon: Icons.electrical_services,
+              isActive: _layerToggles.showElectricalVectors,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showElectricalVectors: !_layerToggles.showElectricalVectors)),
+            ),
+            const SizedBox(width: 8),
+            // Interruptor de fallo ventilador condensador (DEMO 4)
+            ActionChip(
+              visualDensity: VisualDensity.compact,
+              avatar: Icon(
+                condFanOff ? Icons.warning_amber_rounded : Icons.mode_fan_off_outlined,
+                size: 13,
+                color: condFanOff ? ScadaColors.errorRed : ScadaColors.textMuted,
+              ),
+              label: Text(
+                condFanOff ? 'VENT. COND. PARADO' : 'PARAR VENT. COND.',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: condFanOff ? ScadaColors.errorRed : ScadaColors.textSecondary,
+                ),
+              ),
+              backgroundColor: condFanOff ? ScadaColors.errorRed.withValues(alpha: 0.15) : ScadaColors.surface,
+              side: BorderSide(
+                color: condFanOff ? ScadaColors.errorRed : ScadaColors.border,
+              ),
+              onPressed: () {
+                widget.engine.toggleCondenserFan(condFanOff);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLayerChip({
+    required String label,
+    required IconData icon,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: isActive ? ScadaColors.primary.withValues(alpha: 0.2) : ScadaColors.surface,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: isActive ? ScadaColors.primary : ScadaColors.border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 11,
+              color: isActive ? ScadaColors.primary : ScadaColors.textMuted,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                color: isActive ? ScadaColors.textPrimary : ScadaColors.textMuted,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildContextualAlertBanner(ContextualAlert alert, SimulationState state) {

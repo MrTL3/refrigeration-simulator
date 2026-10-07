@@ -3,7 +3,13 @@ import '../../domain/components/compressor_component.dart';
 import '../../domain/components/condenser_component.dart';
 import '../../domain/components/expansion_device_component.dart';
 import '../../domain/components/evaporator_component.dart';
+import '../../domain/models/air_flow_model.dart';
 import '../../domain/models/cold_room_model.dart';
+import '../../domain/models/connection_port.dart';
+import '../../domain/models/electrical_model.dart';
+import '../../domain/models/pipe.dart';
+import '../../domain/models/pipe_segment_state.dart';
+import '../../domain/models/thermodynamic_state.dart';
 import '../../domain/models/thermostat_model.dart';
 import '../../domain/models/transient_metrics.dart';
 import '../engine/simulation_state.dart';
@@ -144,12 +150,17 @@ class DynamicSolver {
     final qCoolingRefW = effectiveMassFlow * (state1.enthalpy - state4.enthalpy);
     final qHeatingRefW = effectiveMassFlow * (state2.enthalpy - state3.enthalpy);
     final wIndicatedW = effectiveMassFlow * (state2.enthalpy - state1.enthalpy);
-    final wElectricW = wIndicatedW / comp.motorEfficiency;
     final cop = wIndicatedW > 0 ? (qCoolingRefW / wIndicatedW) : 0.0;
 
-    // 13. Transferencia de calor en los intercambiadores (W)
-    final qEvapAirW = evap.effectiveUA * (tRoom - tEvap);
-    final qCondAirW = cond.effectiveUA * (tCond - tAmb);
+    // 13. Transferencia de calor en los intercambiadores (W) modulada por ventiladores
+    final condFanOverride = currentState.condenserFanSpeedOverride.clamp(0.0, 1.2);
+    final effectiveCondUA = cond.effectiveUA * (0.12 + 0.88 * condFanOverride);
+
+    final evapFanOverride = currentState.evaporatorFanSpeedOverride.clamp(0.0, 1.2);
+    final effectiveEvapUA = evap.effectiveUA * (0.10 + 0.90 * evapFanOverride);
+
+    final qEvapAirW = effectiveEvapUA * (tRoom - tEvap);
+    final qCondAirW = effectiveCondUA * (tCond - tAmb);
 
     // 14. Ecuaciones Diferenciales Ordinarias (EDOs) de temperatura de baterías
     // dT_evap/dt = (Q_evap_air - Q_ref_evap) / C_evap
@@ -227,9 +238,66 @@ class DynamicSolver {
       }
     }
 
-    // 20. Actualización de componentes del circuito
+    // 20. Cálculo riguroso de modelos físicos enriquecidos (Electricidad, Aire y Tuberías)
+    final electricalState = CompressorElectricalState.calculate(
+      indicatedPowerWatts: wIndicatedW,
+      currentRpm: currentRpm,
+      targetRpm: targetRpm,
+      motorEfficiency: comp.motorEfficiency,
+    );
+
+    final condFanFraction = (currentRpm > 10.0 ? condFanOverride : 0.0);
+    final condenserAirFlow = HeatExchangerAirFlowState.calculateCondenser(
+      heatRejectionWatts: qHeatingRefW,
+      ambientTempK: tAmb,
+      fanSpeedFraction: condFanFraction,
+    );
+
+    final evapFanFraction = (currentState.isRunning ? evapFanOverride : 0.0);
+    final evaporatorAirFlow = HeatExchangerAirFlowState.calculateEvaporator(
+      coolingCapacityWatts: qCoolingRefW,
+      roomAirTempK: tRoom,
+      fanSpeedFraction: evapFanFraction,
+    );
+
+    final updatedPipes = <Pipe>[];
+    final pipeStatesMap = <String, PipeSegmentState>{};
+
+    for (final pipe in circuit.pipes) {
+      ThermodynamicState pState;
+      if (pipe.id == 'pipe_discharge') {
+        pState = state2;
+      } else if (pipe.id == 'pipe_liquid') {
+        pState = state3;
+      } else if (pipe.id == 'pipe_expansion') {
+        pState = state4;
+      } else {
+        pState = state1;
+      }
+
+      final segState = PipeSegmentState.calculate(
+        id: pipe.id,
+        name: pipe.name,
+        state: pState,
+        massFlowKgPerSec: effectiveMassFlow,
+        innerDiameterMm: pipe.innerDiameterMm,
+        lengthMeters: pipe.lengthMeters,
+      );
+      pipeStatesMap[pipe.id] = segState;
+
+      updatedPipes.add(pipe.copyWith(
+        fluidNode: FluidNode(
+          id: pipe.fluidNode.id,
+          name: pipe.fluidNode.name,
+          state: pState,
+          massFlowKgPerSec: effectiveMassFlow,
+        ),
+      ));
+    }
+
+    // 21. Actualización de componentes del circuito
     final updatedComp = comp.copyWith(
-      electricalPowerWatts: wElectricW,
+      electricalPowerWatts: electricalState.activePowerWatts,
       indicatedPowerWatts: wIndicatedW,
     );
     final updatedCond = cond.copyWith(
@@ -250,6 +318,7 @@ class DynamicSolver {
         updatedExp.id: updatedExp,
         updatedEvap.id: updatedEvap,
       },
+      pipes: updatedPipes,
     );
 
     final updatedColdRoom = coldRoom.copyWith(
@@ -278,8 +347,12 @@ class DynamicSolver {
       coolingCapacityWatts: qCoolingRefW,
       heatingCapacityWatts: qHeatingRefW,
       compressorPowerWatts: wIndicatedW,
-      electricalPowerWatts: wElectricW,
+      electricalPowerWatts: electricalState.activePowerWatts,
       cop: cop,
+      electricalState: electricalState,
+      condenserAirFlow: condenserAirFlow,
+      evaporatorAirFlow: evaporatorAirFlow,
+      pipeStates: pipeStatesMap,
       trendPEvap: trendPEvap,
       trendPCond: trendPCond,
       trendTRoom: trendTRoom,
@@ -336,6 +409,30 @@ class DynamicSolver {
     final updatedCond = cond.copyWith(heatRejectionWatts: 0.0);
     final updatedEvap = evap.copyWith(coolingCapacityWatts: 0.0, roomTemperatureKelvin: tRoom);
 
+    final updatedPipes = <Pipe>[];
+    final restingPipesMap = <String, PipeSegmentState>{};
+
+    for (final pipe in currentState.circuit.pipes) {
+      final segState = PipeSegmentState.calculate(
+        id: pipe.id,
+        name: pipe.name,
+        state: restingState,
+        massFlowKgPerSec: 0.0,
+        innerDiameterMm: pipe.innerDiameterMm,
+        lengthMeters: pipe.lengthMeters,
+      );
+      restingPipesMap[pipe.id] = segState;
+
+      updatedPipes.add(pipe.copyWith(
+        fluidNode: FluidNode(
+          id: pipe.fluidNode.id,
+          name: pipe.fluidNode.name,
+          state: restingState,
+          massFlowKgPerSec: 0.0,
+        ),
+      ));
+    }
+
     final updatedCircuit = currentState.circuit.copyWith(
       components: {
         updatedComp.id: updatedComp,
@@ -343,6 +440,19 @@ class DynamicSolver {
         exp.id: exp,
         updatedEvap.id: updatedEvap,
       },
+      pipes: updatedPipes,
+    );
+
+    final electricalState = CompressorElectricalState.off();
+    final condenserAirFlow = HeatExchangerAirFlowState.calculateCondenser(
+      heatRejectionWatts: 0.0,
+      ambientTempK: tAmb,
+      fanSpeedFraction: 0.0,
+    );
+    final evaporatorAirFlow = HeatExchangerAirFlowState.calculateEvaporator(
+      coolingCapacityWatts: 0.0,
+      roomAirTempK: tRoom,
+      fanSpeedFraction: 0.0,
     );
 
     return currentState.copyWith(
@@ -370,6 +480,10 @@ class DynamicSolver {
       compressorPowerWatts: 0.0,
       electricalPowerWatts: 0.0,
       cop: 0.0,
+      electricalState: electricalState,
+      condenserAirFlow: condenserAirFlow,
+      evaporatorAirFlow: evaporatorAirFlow,
+      pipeStates: restingPipesMap,
       trendPEvap: MetricTrend.initial(pEvap),
       trendPCond: MetricTrend.initial(pCond),
       trendTRoom: MetricTrend.calculate(
