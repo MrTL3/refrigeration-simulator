@@ -2,23 +2,26 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../domain/models/basic_cycle_preset.dart';
 import '../../domain/models/circuit.dart';
-import '../solver/circuit_solver.dart';
+import '../../domain/models/educational_experiment.dart';
+import '../solver/dynamic_solver.dart';
 import 'simulation_state.dart';
 
-/// Motor central de simulación física de FrigoLab.
-/// Ejecuta el bucle de integración temporal desacoplado de la interfaz de usuario.
+/// Motor central de simulación física dinámica de FrigoLab.
+/// Ejecuta la integración temporal numérica continua a 20 Hz (dt = 0.05 s)
+/// desacoplado del bucle de pintado de la interfaz.
 class SimulationEngine extends ChangeNotifier {
   late SimulationState _state;
   Timer? _ticker;
+  EducationalExperiment? _activeExperiment;
 
-  /// Paso de tiempo de simulación física en segundos (50 ms = 20 Hz)
+  /// Paso de tiempo canónico de integración física (50 ms = 20 Hz)
   static const double physicsTimeStepSeconds = 0.05;
 
   SimulationEngine({Circuit? initialCircuit}) {
     final circuit = initialCircuit ?? BasicCyclePreset.create();
     _state = SimulationState.initial(circuit);
-    // Realizamos un primer pase para inicializar las condiciones
-    _state = CircuitSolver.solveStep(
+    // Realizamos un primer pase para asentar condiciones iniciales
+    _state = DynamicSolver.integrateStep(
       currentState: _state,
       dt: 0.0,
     );
@@ -26,6 +29,7 @@ class SimulationEngine extends ChangeNotifier {
 
   SimulationState get state => _state;
   bool get isRunning => _state.isRunning;
+  EducationalExperiment? get activeExperiment => _activeExperiment;
 
   /// Arranca la simulación física continua
   void start() {
@@ -47,39 +51,39 @@ class SimulationEngine extends ChangeNotifier {
     _ticker?.cancel();
     _ticker = null;
     _state = _state.copyWith(isRunning: false);
-    // Resolver paso en reposo
-    _state = CircuitSolver.solveStep(
+    // Un pase para actualizar estado de detención
+    _state = DynamicSolver.integrateStep(
       currentState: _state,
       dt: 0.0,
     );
     notifyListeners();
   }
 
-  /// Ejecuta un paso temporal único manual (útil para docencia y depuración)
+  /// Ejecuta un único paso temporal manual
   void step() {
     _onTick();
   }
 
-  /// Restablece la simulación al circuito básico original
+  /// Restablece la simulación al circuito inicial
   void reset() {
     pause();
     final defaultCircuit = BasicCyclePreset.create();
     _state = SimulationState.initial(defaultCircuit);
-    _state = CircuitSolver.solveStep(currentState: _state, dt: 0.0);
+    _state = DynamicSolver.integrateStep(currentState: _state, dt: 0.0);
+    _activeExperiment = null;
     notifyListeners();
   }
 
   void _onTick() {
-    _state = CircuitSolver.solveStep(
+    _state = DynamicSolver.integrateStep(
       currentState: _state,
       dt: physicsTimeStepSeconds,
     );
     notifyListeners();
   }
 
-  // --- Modificadores de parámetros en caliente ---
+  // --- Modificadores de parámetros físicos ---
 
-  /// Ajusta las RPM del compresor
   void setCompressorRpm(double rpm) {
     final comp = _state.circuit.compressor;
     if (comp == null) return;
@@ -87,7 +91,6 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedComp);
   }
 
-  /// Ajusta el porcentaje de apertura de la válvula de expansión
   void setValveOpening(double percent) {
     final exp = _state.circuit.expansionDevice;
     if (exp == null) return;
@@ -95,7 +98,13 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedExp);
   }
 
-  /// Modifica la temperatura ambiente externa (Kelvin)
+  void setTxvAutomatic(bool automatic) {
+    final exp = _state.circuit.expansionDevice;
+    if (exp == null) return;
+    final updatedExp = exp.copyWith(isAutomatic: automatic);
+    _updateComponentInCircuit(updatedExp);
+  }
+
   void setAmbientTemperature(double tempKelvin) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
@@ -103,15 +112,16 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedCond);
   }
 
-  /// Modifica la temperatura de la cámara/recinto (Kelvin)
+  void setTxvOpening(double percent) => setValveOpening(percent);
+
   void setRoomTemperature(double tempKelvin) {
-    final evap = _state.circuit.evaporator;
-    if (evap == null) return;
-    final updatedEvap = evap.copyWith(roomTemperatureKelvin: tempKelvin);
-    _updateComponentInCircuit(updatedEvap);
+    final updatedColdRoom = _state.coldRoom.copyWith(temperatureKelvin: tempKelvin);
+    _state = _state.copyWith(coldRoom: updatedColdRoom);
+    notifyListeners();
   }
 
-  /// Conmuta el ventilador del condensador
+  void setColdRoomTemperature(double tempKelvin) => setRoomTemperature(tempKelvin);
+
   void toggleCondenserFan(bool operational) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
@@ -119,7 +129,6 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedCond);
   }
 
-  /// Conmuta el ventilador del evaporador
   void toggleEvaporatorFan(bool operational) {
     final evap = _state.circuit.evaporator;
     if (evap == null) return;
@@ -127,7 +136,6 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedEvap);
   }
 
-  /// Ajusta la suciedad del condensador
   void setCondenserFouling(double fouling) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
@@ -135,12 +143,96 @@ class SimulationEngine extends ChangeNotifier {
     _updateComponentInCircuit(updatedCond);
   }
 
+  // --- Control Termostático y Carga Térmica ---
+
+  void setThermostatEnabled(bool enabled) {
+    final updated = _state.thermostat.copyWith(isEnabled: enabled);
+    _state = _state.copyWith(thermostat: updated);
+    notifyListeners();
+  }
+
+  void setThermostatSetpoint(double setpointCelsius) {
+    final updated = _state.thermostat.copyWith(setpointCelsius: setpointCelsius);
+    _state = _state.copyWith(thermostat: updated);
+    notifyListeners();
+  }
+
+  void setThermostatHysteresis(double hysteresisK) {
+    final updated = _state.thermostat.copyWith(hysteresisKelvin: hysteresisK);
+    _state = _state.copyWith(thermostat: updated);
+    notifyListeners();
+  }
+
+  void setInternalHeatLoad(double watts) {
+    final updated = _state.coldRoom.copyWith(internalHeatLoadWatts: watts.clamp(0.0, 10000.0));
+    _state = _state.copyWith(coldRoom: updated);
+    notifyListeners();
+  }
+
+  void setInfiltrationLoad(double watts) {
+    final updated = _state.coldRoom.copyWith(infiltrationLoadWatts: watts.clamp(0.0, 10000.0));
+    _state = _state.copyWith(coldRoom: updated);
+    notifyListeners();
+  }
+
+  // --- Sistema de Prácticas y Experimentos Educativos ---
+
+  void startExperiment(EducationalExperiment experiment) {
+    _activeExperiment = experiment.copyWith(phase: ExperimentPhase.stabilizingBaseline);
+    // Aplicamos valor de referencia basal
+    switch (experiment.type) {
+      case ExperimentType.rpmVariation:
+        setCompressorRpm(experiment.baselineValue);
+      case ExperimentType.ambientTemperatureVariation:
+        setAmbientTemperature(experiment.baselineValue + 273.15);
+      case ExperimentType.expansionValveThrottling:
+        setTxvAutomatic(false);
+        setValveOpening(experiment.baselineValue);
+    }
+    start();
+    notifyListeners();
+  }
+
+  void applyExperimentPerturbation() {
+    if (_activeExperiment == null) return;
+
+    final exp = _activeExperiment!;
+    switch (exp.type) {
+      case ExperimentType.rpmVariation:
+        setCompressorRpm(exp.perturbedValue);
+      case ExperimentType.ambientTemperatureVariation:
+        setAmbientTemperature(exp.perturbedValue + 273.15);
+      case ExperimentType.expansionValveThrottling:
+        setValveOpening(exp.perturbedValue);
+    }
+    _activeExperiment = exp.copyWith(phase: ExperimentPhase.observingTransient);
+    notifyListeners();
+  }
+
+  void evaluateExperimentResults() {
+    if (_activeExperiment == null) return;
+    _activeExperiment = _activeExperiment!.copyWith(phase: ExperimentPhase.evaluatingResults);
+    notifyListeners();
+  }
+
+  void completeExperiment() {
+    if (_activeExperiment == null) return;
+    _activeExperiment = _activeExperiment!.copyWith(phase: ExperimentPhase.completed);
+    notifyListeners();
+  }
+
+  void cancelExperiment() {
+    _activeExperiment = null;
+    notifyListeners();
+  }
+
+  void clearActiveExperiment() => cancelExperiment();
+
   void _updateComponentInCircuit(dynamic component) {
     final newComponents = Map.of(_state.circuit.components);
     newComponents[component.id] = component;
     final newCircuit = _state.circuit.copyWith(components: newComponents);
     _state = _state.copyWith(circuit: newCircuit);
-    _state = CircuitSolver.solveStep(currentState: _state, dt: 0.0);
     notifyListeners();
   }
 

@@ -8,6 +8,8 @@ import '../widgets/component_inspector_modal.dart';
 import '../widgets/pid_canvas.dart';
 import '../widgets/simulation_control_panel.dart';
 import '../widgets/telemetry_dashboard.dart';
+import '../widgets/thermostat_widget.dart';
+import '../widgets/transient_chart_widget.dart';
 
 /// Pantalla principal del simulador y laboratorio virtual.
 class SimulatorScreen extends StatefulWidget {
@@ -131,6 +133,20 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 10),
+
+                // Control termostático de la cámara
+                ThermostatWidget(
+                  thermostat: state.thermostat,
+                  coldRoom: state.coldRoom,
+                  onToggleEnabled: (en) => widget.engine.setThermostatEnabled(en),
+                  onSetpointChanged: (sp) => widget.engine.setThermostatSetpoint(sp),
+                  onHysteresisChanged: (h) => widget.engine.setThermostatHysteresis(h),
+                ),
+                const SizedBox(height: 10),
+
+                // Gráfica de evolución temporal viva
+                TransientChartWidget(history: state.timeSeriesHistory),
                 const SizedBox(height: 10),
 
                 // Panel inferior de mandos y actuadores

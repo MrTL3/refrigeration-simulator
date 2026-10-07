@@ -3,6 +3,7 @@ import '../../core/units/pressure_unit.dart';
 import '../../core/units/temperature_unit.dart';
 import '../../simulation/engine/simulation_engine.dart';
 import '../theme/scada_colors.dart';
+import 'experiment_screen.dart';
 import 'learn_screen.dart';
 import 'roadmap_phase_screen.dart';
 import 'simulator_screen.dart';
@@ -189,18 +190,10 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
           pressureUnit: _pressureUnit,
         );
       case 3:
-        return const RoadmapPhaseScreen(
-          title: 'Laboratorio de Ensayos y Experimentos',
-          phaseBadge: 'FASE 4 / FASE 5 (ROADMAP)',
-          description:
-              'Este módulo permitirá al usuario modificar activamente perturbaciones exteriores y observar el comportamiento dinámico transitorio en tiempo real.',
-          icon: Icons.science,
-          plannedFeatures: [
-            'Simulación de transitorios de arranque y parada con curvas de inercia.',
-            'Modificación dinámica de la carga térmica del recinto.',
-            'Generación interactiva de gráficas Presión-Tiempo y Temperatura-Tiempo.',
-            'Trazado dinámico sobre diagrama P-h (Mollier) y T-s.',
-          ],
+        return ExperimentScreen(
+          engine: widget.engine,
+          pressureUnit: _pressureUnit,
+          temperatureUnit: _temperatureUnit,
         );
       case 4:
         return const RoadmapPhaseScreen(

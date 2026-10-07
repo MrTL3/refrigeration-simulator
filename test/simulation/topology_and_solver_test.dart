@@ -28,8 +28,8 @@ void main() {
       final engine = SimulationEngine();
       engine.start();
 
-      // Ejecutamos varios pasos
-      for (int i = 0; i < 5; i++) {
+      // Ejecutamos pasos para permitir desarrollo de presiones dinámicas
+      for (int i = 0; i < 100; i++) {
         engine.step();
       }
 

@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import '../../core/units/pressure_unit.dart';
 import '../../core/units/temperature_unit.dart';
 import '../../core/units/unit_formatter.dart';
+import '../../domain/models/transient_metrics.dart';
 import '../../simulation/engine/simulation_state.dart';
 import '../theme/scada_colors.dart';
+import 'trend_indicator.dart';
 
-/// Dashboard de telemetría de instrumentación SCADA en tiempo real.
+/// Dashboard de telemetría de instrumentación SCADA con tendencias y modos operacionales.
 class TelemetryDashboard extends StatelessWidget {
   final SimulationState state;
   final PressureUnit pressureUnit;
@@ -32,11 +34,15 @@ class TelemetryDashboard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Cabecera del Dashboard con botón "¿QUÉ ESTÁ PASANDO?"
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Cabecera del Dashboard con Modo Operacional y botón "¿QUÉ ESTÁ PASANDO?"
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     state.isRunning ? Icons.sensors : Icons.sensors_off,
@@ -53,6 +59,8 @@ class TelemetryDashboard extends StatelessWidget {
                       letterSpacing: 1.1,
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  _buildModeBadge(),
                 ],
               ),
               ElevatedButton.icon(
@@ -74,7 +82,7 @@ class TelemetryDashboard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Rejilla de indicadores principales
+          // Rejilla de indicadores principales con tendencias
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -83,6 +91,8 @@ class TelemetryDashboard extends StatelessWidget {
                 title: 'BAJA PRESIÓN (P₀)',
                 value: UnitFormatter.formatPressure(state.evaporatingPressurePa, pressureUnit),
                 subtext: 'T_sat: ${UnitFormatter.formatTemperature(state.evaporatingTemperatureK, temperatureUnit)}',
+                trend: state.trendPEvap,
+                deltaFormatted: UnitFormatter.formatPressure(state.trendPEvap.delta, pressureUnit, decimals: 3),
                 color: ScadaColors.lowPressureSuction,
                 icon: Icons.speed,
               ),
@@ -90,8 +100,19 @@ class TelemetryDashboard extends StatelessWidget {
                 title: 'ALTA PRESIÓN (Pₖ)',
                 value: UnitFormatter.formatPressure(state.condensingPressurePa, pressureUnit),
                 subtext: 'T_sat: ${UnitFormatter.formatTemperature(state.condensingTemperatureK, temperatureUnit)}',
+                trend: state.trendPCond,
+                deltaFormatted: UnitFormatter.formatPressure(state.trendPCond.delta, pressureUnit, decimals: 3),
                 color: ScadaColors.highPressureDischarge,
                 icon: Icons.speed,
+              ),
+              _buildMetricCard(
+                title: 'T_CÁMARA (RECINTO)',
+                value: UnitFormatter.formatTemperature(state.coldRoom.temperatureKelvin, temperatureUnit),
+                subtext: 'Carga: ${state.coldRoom.totalHeatLoadWatts(state.circuit.condenser?.ambientTemperatureKelvin ?? 298.15).toStringAsFixed(0)} W',
+                trend: state.trendTRoom,
+                deltaFormatted: '${(state.trendTRoom.delta).toStringAsFixed(2)} K',
+                color: ScadaColors.runningGreen,
+                icon: Icons.kitchen,
               ),
               _buildMetricCard(
                 title: 'SUPERHEAT (SH)',
@@ -99,13 +120,6 @@ class TelemetryDashboard extends StatelessWidget {
                 subtext: _superheatStatusText(state.superheatKelvin),
                 color: _superheatColor(state.superheatKelvin),
                 icon: Icons.thermostat,
-              ),
-              _buildMetricCard(
-                title: 'SUBCOOLING (SC)',
-                value: '${state.subcoolingKelvin.toStringAsFixed(1)} K',
-                subtext: _subcoolingStatusText(state.subcoolingKelvin),
-                color: _subcoolingColor(state.subcoolingKelvin),
-                icon: Icons.ac_unit,
               ),
               _buildMetricCard(
                 title: 'POTENCIA FRÍO (Qₑ)',
@@ -117,13 +131,53 @@ class TelemetryDashboard extends StatelessWidget {
               _buildMetricCard(
                 title: 'EFICIENCIA (COP)',
                 value: state.cop > 0 ? state.cop.toStringAsFixed(2) : '--',
-                subtext: 'Q_rechazo: ${(state.heatingCapacityWatts / 1000.0).toStringAsFixed(2)} kW',
-                color: ScadaColors.runningGreen,
+                subtext: 'm_dot: ${(state.massFlowKgPerSec * 1000.0).toStringAsFixed(1)} g/s',
+                color: ScadaColors.infoBlue,
                 icon: Icons.auto_graph,
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildModeBadge() {
+    Color bg;
+    Color fg;
+    switch (state.operationalMode) {
+      case SystemOperationalMode.off:
+        bg = ScadaColors.surfaceCard;
+        fg = ScadaColors.textMuted;
+      case SystemOperationalMode.starting:
+        bg = ScadaColors.warningAmber.withValues(alpha: 0.2);
+        fg = ScadaColors.warningAmber;
+      case SystemOperationalMode.transient:
+        bg = ScadaColors.infoBlue.withValues(alpha: 0.2);
+        fg = ScadaColors.infoBlue;
+      case SystemOperationalMode.steadyState:
+        bg = ScadaColors.runningGreen.withValues(alpha: 0.2);
+        fg = ScadaColors.runningGreen;
+      case SystemOperationalMode.stopping:
+        bg = ScadaColors.dangerRed.withValues(alpha: 0.2);
+        fg = ScadaColors.dangerRed;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: fg.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        state.operationalMode.label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: fg,
+          fontFamily: 'monospace',
+        ),
       ),
     );
   }
@@ -134,6 +188,8 @@ class TelemetryDashboard extends StatelessWidget {
     required String subtext,
     required Color color,
     required IconData icon,
+    MetricTrend? trend,
+    String? deltaFormatted,
   }) {
     return Container(
       width: 175,
@@ -165,14 +221,29 @@ class TelemetryDashboard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: color,
-              fontFamily: 'monospace',
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+              if (trend != null && deltaFormatted != null) ...[
+                const SizedBox(width: 4),
+                TrendIndicator(trend: trend, formattedDelta: deltaFormatted),
+              ],
+            ],
           ),
           const SizedBox(height: 2),
           Text(
@@ -196,18 +267,6 @@ class TelemetryDashboard extends StatelessWidget {
   Color _superheatColor(double sh) {
     if (sh < 4.0) return ScadaColors.dangerRed;
     if (sh <= 10.0) return ScadaColors.runningGreen;
-    return ScadaColors.warningAmber;
-  }
-
-  String _subcoolingStatusText(double sc) {
-    if (sc < 2.0) return 'RIESGO FLASH GAS';
-    if (sc <= 7.0) return 'ÓPTIMO';
-    return 'SOBRECONDENSACIÓN';
-  }
-
-  Color _subcoolingColor(double sc) {
-    if (sc < 2.0) return ScadaColors.dangerRed;
-    if (sc <= 7.0) return ScadaColors.runningGreen;
     return ScadaColors.warningAmber;
   }
 }
