@@ -17,13 +17,18 @@ import '../widgets/telemetry_dashboard.dart';
 import '../widgets/thermostat_widget.dart';
 import '../widgets/transient_chart_widget.dart';
 import '../widgets/ts_diagram_widget.dart';
+import '../widgets/simulation_parameters_panel.dart';
+import '../../visualization/installation_plant_view.dart';
+import '../../visualization/models/installation_instrument.dart';
+import '../widgets/desktop_inspector_panel.dart';
+import 'fullscreen_simulator_screen.dart';
 
 /// Modo de visualización central de la planta
 enum CentralViewMode {
-  realistic25D('Planta Física 2.5D', Icons.precision_manufacturing_outlined),
-  pid('Sinóptico P&ID', Icons.account_tree_outlined),
-  instruments('SCADA Instrumentos', Icons.speed_outlined),
-  phDiagram('Diagrama P-h (Mollier)', Icons.show_chart_rounded),
+  installation('Instalación', Icons.domain),
+  pid('P&ID Técnico', Icons.account_tree_outlined),
+  instruments('Instrumentos', Icons.speed_outlined),
+  phDiagram('Diagrama P-h', Icons.show_chart_rounded),
   tsDiagram('Diagrama T-s', Icons.multiline_chart_rounded);
 
   final String label;
@@ -54,9 +59,11 @@ class SimulatorScreen extends StatefulWidget {
 
 class _SimulatorScreenState extends State<SimulatorScreen> {
   BaseComponent? _selectedComponent;
-  CentralViewMode _viewMode = CentralViewMode.realistic25D;
+  CentralViewMode _viewMode = CentralViewMode.installation;
   SimulationInformationLevel _informationLevel = SimulationInformationLevel.level3Technician;
   VisualLayerToggles _layerToggles = const VisualLayerToggles();
+  InstallationInstrument? _selectedInstrument;
+  bool _showDesktopInspector = true;
 
   @override
   void initState() {
@@ -71,6 +78,38 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
       state: widget.engine.state,
       pressureUnit: widget.pressureUnit,
       temperatureUnit: widget.temperatureUnit,
+    );
+  }
+
+  void _openFullscreenMode() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => FullscreenSimulatorScreen(
+          engine: widget.engine,
+          pressureUnit: widget.pressureUnit,
+          temperatureUnit: widget.temperatureUnit,
+          initialViewMode: _viewMode,
+          onPressureUnitChanged: widget.onPressureUnitChanged,
+          onTemperatureUnitChanged: widget.onTemperatureUnitChanged,
+        ),
+      ),
+    );
+  }
+
+  void _openParametersModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.85,
+        child: SimulationParametersPanel(
+          engine: widget.engine,
+          pressureUnit: widget.pressureUnit,
+          temperatureUnit: widget.temperatureUnit,
+          onClose: () => Navigator.pop(ctx),
+        ),
+      ),
     );
   }
 
@@ -90,7 +129,7 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
     if (target != null) {
       setState(() {
         _selectedComponent = target;
-        _viewMode = CentralViewMode.realistic25D;
+        _viewMode = CentralViewMode.installation;
       });
       _openExplainer(target);
     }
@@ -229,11 +268,11 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
 
         return Scaffold(
           backgroundColor: ScadaColors.background,
-          body: LayoutBuilder(
-            builder: (context, constraints) {
-              final isTallScreen = constraints.maxHeight >= 900;
-
-              final content = [
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 // Barra de estado superior
                 _buildSystemStatusBar(state),
                 const SizedBox(height: 10),
@@ -261,21 +300,73 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
                 _buildViewSelector(),
                 const SizedBox(height: 8),
 
-                // Lienzo central interactivo (P&ID, P-h Mollier o T-s)
-                Container(
-                  height: isTallScreen
-                      ? null
-                      : (_viewMode == CentralViewMode.pid
-                          ? 380.0
-                          : (_viewMode == CentralViewMode.realistic25D ? 480.0 : 520.0)),
-                  decoration: BoxDecoration(
-                    color: ScadaColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: ScadaColors.border),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: _buildCentralContent(state, selectedComp),
+                // Lienzo central interactivo y panel lateral responsivo (Fases 7 y 8)
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isDesktop = constraints.maxWidth >= 1024;
+                    final canvasHeight = isDesktop ? 560.0 : 480.0;
+
+                    final canvasWidget = Container(
+                      height: canvasHeight,
+                      decoration: BoxDecoration(
+                        color: ScadaColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: ScadaColors.border),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: _buildCentralContent(state, selectedComp),
+                    );
+
+                    if (isDesktop && _showDesktopInspector) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: canvasWidget),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            height: canvasHeight,
+                            child: DesktopInspectorPanel(
+                              component: _selectedComponent,
+                              instrument: _selectedInstrument,
+                              state: state,
+                              engine: widget.engine,
+                              pressureUnit: widget.pressureUnit,
+                              temperatureUnit: widget.temperatureUnit,
+                              onClose: () => setState(() => _showDesktopInspector = false),
+                              onInspectWhy: (tag) {
+                                if (_selectedComponent != null) {
+                                  _openExplainer(_selectedComponent!);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    } else if (isDesktop && !_showDesktopInspector) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          canvasWidget,
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () => setState(() => _showDesktopInspector = true),
+                              icon: const Icon(Icons.dock, size: 14),
+                              label: const Text('ABRIR PANEL LATERAL TÉCNICO', style: TextStyle(fontSize: 10, color: ScadaColors.cyanAccent)),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+
+                    return canvasWidget;
+                  },
                 ),
+                const SizedBox(height: 10),
+
+                // Mandos rápidos de máquina y acceso inmersivo
+                _buildMachineQuickControlStrip(state),
                 const SizedBox(height: 10),
 
                 // Control termostático de la cámara
@@ -300,65 +391,8 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
                   onPressureUnitChanged: widget.onPressureUnitChanged,
                   onTemperatureUnitChanged: widget.onTemperatureUnitChanged,
                 ),
-              ];
-
-              if (isTallScreen) {
-                return Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildSystemStatusBar(state),
-                      if (alert != null) ...[
-                        const SizedBox(height: 10),
-                        _buildContextualAlertBanner(alert, state),
-                      ],
-                      const SizedBox(height: 10),
-                      TelemetryDashboard(
-                        state: state,
-                        pressureUnit: widget.pressureUnit,
-                        temperatureUnit: widget.temperatureUnit,
-                        onExplainPressed: () {
-                          if (selectedComp != null) {
-                            _openExplainer(selectedComp);
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      _buildViewSelector(),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: ScadaColors.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: ScadaColors.border),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: _buildCentralContent(state, selectedComp),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SimulationControlPanel(
-                        engine: widget.engine,
-                        pressureUnit: widget.pressureUnit,
-                        temperatureUnit: widget.temperatureUnit,
-                        onPressureUnitChanged: widget.onPressureUnitChanged,
-                        onTemperatureUnitChanged: widget.onTemperatureUnitChanged,
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: content,
-                ),
-              );
-            },
+              ],
+            ),
           ),
         );
       },
@@ -367,70 +401,84 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
 
   Widget _buildViewSelector() {
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
         color: ScadaColors.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: ScadaColors.border),
       ),
-      child: Row(
-        children: CentralViewMode.values.map((mode) {
-          final isSelected = _viewMode == mode;
-          return Expanded(
-            child: InkWell(
-              onTap: () => setState(() => _viewMode = mode),
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: isSelected ? ScadaColors.surfaceCard : Colors.transparent,
-                  borderRadius: BorderRadius.circular(6),
-                  border: isSelected ? Border.all(color: ScadaColors.borderLight) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      mode.icon,
-                      size: 14,
-                      color: isSelected ? ScadaColors.primary : ScadaColors.textMuted,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: CentralViewMode.values.map((mode) {
+            final isSelected = _viewMode == mode;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: InkWell(
+                onTap: () => setState(() => _viewMode = mode),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? ScadaColors.infoBlue.withValues(alpha: 0.25) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                    border: isSelected
+                        ? Border.all(color: ScadaColors.infoBlue, width: 1.2)
+                        : Border.all(color: Colors.transparent),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        mode.icon,
+                        size: 15,
+                        color: isSelected ? ScadaColors.infoBlue : ScadaColors.textMuted,
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
                         mode.label,
                         style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          color: isSelected ? ScadaColors.textPrimary : ScadaColors.textMuted,
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          color: isSelected ? ScadaColors.textPrimary : ScadaColors.textSecondary,
                         ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
 
   Widget _buildCentralContent(SimulationState state, BaseComponent? selectedComp) {
     switch (_viewMode) {
-      case CentralViewMode.realistic25D:
+      case CentralViewMode.installation:
         return Stack(
           children: [
-            RealisticPlantCanvas(
+            InstallationPlantView(
               state: state,
               informationLevel: _informationLevel,
               layerToggles: _layerToggles,
               selectedComponent: selectedComp,
+              onFullscreen: _openFullscreenMode,
+              onInstrumentSelected: (inst) {
+                setState(() {
+                  _selectedInstrument = inst;
+                  _showDesktopInspector = true;
+                });
+              },
               onComponentSelected: (comp) {
-                setState(() => _selectedComponent = comp);
-                _openExplainer(comp);
+                setState(() {
+                  _selectedComponent = comp;
+                  _showDesktopInspector = true;
+                });
+                if (MediaQuery.of(context).size.width < 1024) {
+                  _openExplainer(comp);
+                }
               },
               onInspectWhy: (title) {
                 if (selectedComp != null) {
@@ -600,6 +648,13 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
               isActive: _layerToggles.showElectricalVectors,
               onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showElectricalVectors: !_layerToggles.showElectricalVectors)),
             ),
+            const SizedBox(width: 4),
+            _buildLayerChip(
+              label: 'INSTRUMENTOS',
+              icon: Icons.speed,
+              isActive: _layerToggles.showInstruments,
+              onTap: () => setState(() => _layerToggles = _layerToggles.copyWith(showInstruments: !_layerToggles.showInstruments)),
+            ),
             const SizedBox(width: 8),
             // Interruptor de fallo ventilador condensador (DEMO 4)
             ActionChip(
@@ -624,6 +679,38 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
               onPressed: () {
                 widget.engine.toggleCondenserFan(condFanOff);
               },
+            ),
+            const SizedBox(width: 8),
+            ActionChip(
+              visualDensity: VisualDensity.compact,
+              avatar: const Icon(Icons.tune, size: 13, color: ScadaColors.primary),
+              label: const Text(
+                'PARÁMETROS',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: ScadaColors.primary,
+                ),
+              ),
+              backgroundColor: ScadaColors.primary.withValues(alpha: 0.12),
+              side: const BorderSide(color: ScadaColors.primary),
+              onPressed: _openParametersModal,
+            ),
+            const SizedBox(width: 6),
+            ActionChip(
+              visualDensity: VisualDensity.compact,
+              avatar: const Icon(Icons.fullscreen, size: 14, color: ScadaColors.infoBlue),
+              label: const Text(
+                'PANTALLA COMPLETA',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: ScadaColors.infoBlue,
+                ),
+              ),
+              backgroundColor: ScadaColors.infoBlue.withValues(alpha: 0.15),
+              side: const BorderSide(color: ScadaColors.infoBlue),
+              onPressed: _openFullscreenMode,
             ),
           ],
         ),
@@ -847,8 +934,334 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
                 ),
               ],
             ),
+            const SizedBox(width: 16),
+            // Accesos directos a pantalla completa y parámetros
+            InkWell(
+              onTap: _openParametersModal,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: ScadaColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: ScadaColors.primary.withValues(alpha: 0.5)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.tune, size: 12, color: ScadaColors.primary),
+                    SizedBox(width: 4),
+                    Text(
+                      'PARÁMETROS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: ScadaColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: _openFullscreenMode,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: ScadaColors.infoBlue.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: ScadaColors.infoBlue.withValues(alpha: 0.6)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.fullscreen, size: 13, color: ScadaColors.infoBlue),
+                    SizedBox(width: 4),
+                    Text(
+                      'PANTALLA COMPLETA',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: ScadaColors.infoBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMachineQuickControlStrip(SimulationState state) {
+    final comp = state.circuit.compressor;
+    final exp = state.circuit.expansionDevice;
+    final cond = state.circuit.condenser;
+    final isRunning = state.isRunning;
+    final rpm = comp?.rpm ?? 1450.0;
+    final isTxvAuto = exp?.isAutomatic ?? true;
+    final txvOpening = exp?.openingPercent ?? 50.0;
+    final isFanOperational = state.condenserFanSpeedOverride != 0.0 && (cond?.fanOperational ?? true);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ScadaColors.surfaceCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ScadaColors.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Cabecera del puesto de mando
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: ScadaColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(Icons.settings_input_component, size: 16, color: ScadaColors.primary),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'PUESTO DE MANDO Y ACCESO INMERSIVO',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: ScadaColors.textPrimary,
+                        letterSpacing: 0.8,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Interacción directa con la planta frigorífica en tiempo real',
+                      style: TextStyle(fontSize: 10, color: ScadaColors.textMuted),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _openParametersModal,
+                  icon: const Icon(Icons.tune, size: 14),
+                  label: const Text('PARÁMETROS'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: ScadaColors.primary,
+                    side: const BorderSide(color: ScadaColors.primary),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _openFullscreenMode,
+                  icon: const Icon(Icons.fullscreen, size: 16),
+                  label: const Text('PANTALLA COMPLETA'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: ScadaColors.infoBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: ScadaColors.border),
+          const SizedBox(height: 10),
+
+          // Controles rápidos de actuadores
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              // Botones de ejecución simulación
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton.filled(
+                    tooltip: isRunning ? 'Pausar simulación' : 'Poner en marcha simulación',
+                    style: IconButton.styleFrom(
+                      backgroundColor: isRunning ? ScadaColors.warningAmber : ScadaColors.runningGreen,
+                      foregroundColor: Colors.black,
+                    ),
+                    icon: Icon(isRunning ? Icons.pause : Icons.play_arrow, size: 18),
+                    onPressed: () {
+                      if (isRunning) {
+                        widget.engine.pause();
+                      } else {
+                        widget.engine.start();
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.outlined(
+                    tooltip: 'Paso discreto dt = 0.05 s',
+                    style: IconButton.styleFrom(
+                      foregroundColor: ScadaColors.textPrimary,
+                      side: const BorderSide(color: ScadaColors.borderLight),
+                    ),
+                    icon: const Icon(Icons.skip_next, size: 18),
+                    onPressed: isRunning ? null : () => widget.engine.step(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.outlined(
+                    tooltip: 'Reiniciar simulación',
+                    style: IconButton.styleFrom(
+                      foregroundColor: ScadaColors.dangerRed,
+                      side: const BorderSide(color: ScadaColors.borderLight),
+                    ),
+                    icon: const Icon(Icons.restart_alt, size: 18),
+                    onPressed: () => widget.engine.reset(),
+                  ),
+                ],
+              ),
+
+              // Control rápido RPM
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: ScadaColors.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: ScadaColors.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.speed, size: 14, color: ScadaColors.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'RPM: ${rpm.toStringAsFixed(0)}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ScadaColors.textPrimary),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => widget.engine.setCompressorRpm((rpm - 200).clamp(500.0, 4500.0)),
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: ScadaColors.surfaceCard,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: ScadaColors.border),
+                        ),
+                        child: const Icon(Icons.remove, size: 12, color: ScadaColors.textSecondary),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () => widget.engine.setCompressorRpm((rpm + 200).clamp(500.0, 4500.0)),
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: ScadaColors.surfaceCard,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: ScadaColors.border),
+                        ),
+                        child: const Icon(Icons.add, size: 12, color: ScadaColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Control rápido TXV
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: ScadaColors.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: ScadaColors.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.filter_alt, size: 14, color: ScadaColors.infoBlue),
+                    const SizedBox(width: 6),
+                    Text(
+                      'TXV: ${isTxvAuto ? 'AUTO' : '${txvOpening.toStringAsFixed(0)}%'}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ScadaColors.textPrimary),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => widget.engine.setTxvAutomatic(!isTxvAuto),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isTxvAuto ? ScadaColors.infoBlue.withValues(alpha: 0.2) : ScadaColors.warningAmber.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: isTxvAuto ? ScadaColors.infoBlue : ScadaColors.warningAmber),
+                        ),
+                        child: Text(
+                          isTxvAuto ? 'MANUAL' : 'AUTO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isTxvAuto ? ScadaColors.infoBlue : ScadaColors.warningAmber,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Control rápido Ventilador Condensador
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                avatar: Icon(
+                  isFanOperational ? Icons.air : Icons.mode_fan_off,
+                  size: 14,
+                  color: isFanOperational ? ScadaColors.runningGreen : ScadaColors.errorRed,
+                ),
+                label: Text(
+                  isFanOperational ? 'VENT. COND. ON' : 'VENT. COND. OFF',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: isFanOperational ? ScadaColors.runningGreen : ScadaColors.errorRed,
+                  ),
+                ),
+                backgroundColor: isFanOperational
+                    ? ScadaColors.runningGreen.withValues(alpha: 0.1)
+                    : ScadaColors.errorRed.withValues(alpha: 0.15),
+                side: BorderSide(
+                  color: isFanOperational ? ScadaColors.runningGreen : ScadaColors.errorRed,
+                ),
+                onPressed: () => widget.engine.toggleCondenserFan(!isFanOperational),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../core/units/pressure_unit.dart';
 import '../../core/units/temperature_unit.dart';
 import '../../simulation/engine/simulation_engine.dart';
+import '../../state/session_coordinator.dart';
 import '../theme/scada_colors.dart';
+import '../widgets/control_bar/session_control_bar.dart';
 import 'experiment_screen.dart';
 import 'learn_screen.dart';
 import 'roadmap_phase_screen.dart';
@@ -12,8 +14,9 @@ import 'workshop_screen.dart';
 /// Estructura de navegación principal y contenedor adaptativo de FrigoLab.
 class MainLayoutScreen extends StatefulWidget {
   final SimulationEngine engine;
+  final SessionCoordinator? coordinator;
 
-  const MainLayoutScreen({super.key, required this.engine});
+  const MainLayoutScreen({super.key, required this.engine, this.coordinator});
 
   @override
   State<MainLayoutScreen> createState() => _MainLayoutScreenState();
@@ -23,6 +26,13 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
   int _currentIndex = 0;
   PressureUnit _pressureUnit = PressureUnit.bar;
   TemperatureUnit _temperatureUnit = TemperatureUnit.celsius;
+  late final SessionCoordinator _coordinator;
+
+  @override
+  void initState() {
+    super.initState();
+    _coordinator = widget.coordinator ?? SessionCoordinator(engine: widget.engine);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +42,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
 
         return Scaffold(
           backgroundColor: ScadaColors.background,
-          appBar: _buildTopAppBar(),
+          appBar: _buildTopAppBar(isWide),
           body: Row(
             children: [
               if (isWide) _buildNavigationRail(),
@@ -45,9 +55,10 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     );
   }
 
-  PreferredSizeWidget _buildTopAppBar() {
+  PreferredSizeWidget _buildTopAppBar(bool isWide) {
     return AppBar(
       title: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: const EdgeInsets.all(6),
@@ -59,34 +70,44 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
             child: const Icon(Icons.severe_cold, color: ScadaColors.infoBlue, size: 20),
           ),
           const SizedBox(width: 10),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'FRIGOLAB',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                  letterSpacing: 1.5,
-                  color: ScadaColors.textPrimary,
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'FRIGOLAB',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    letterSpacing: 1.5,
+                    color: ScadaColors.textPrimary,
+                  ),
                 ),
-              ),
-              Text(
-                'Laboratorio Virtual de Refrigeración Industrial',
-                style: TextStyle(fontSize: 10, color: ScadaColors.textMuted),
-              ),
-            ],
+                if (isWide)
+                  const Text(
+                    'Laboratorio Virtual de Refrigeración Industrial',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: ScadaColors.textMuted),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
       actions: [
-        Chip(
-          label: const Text('FASE 1: FUNDAMENTOS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-          backgroundColor: ScadaColors.surfaceCard,
-          side: const BorderSide(color: ScadaColors.runningGreen),
-          labelStyle: const TextStyle(color: ScadaColors.runningGreen),
-          visualDensity: VisualDensity.compact,
-        ),
+        SessionControlBar(coordinator: _coordinator, compact: !isWide),
+        if (isWide) ...[
+          const SizedBox(width: 8),
+          Chip(
+            label: const Text('FASE 1: FUNDAMENTOS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+            backgroundColor: ScadaColors.surfaceCard,
+            side: const BorderSide(color: ScadaColors.runningGreen),
+            labelStyle: const TextStyle(color: ScadaColors.runningGreen),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
         const SizedBox(width: 12),
       ],
     );
@@ -188,6 +209,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
         return WorkshopScreen(
           engine: widget.engine,
           pressureUnit: _pressureUnit,
+          coordinator: _coordinator,
         );
       case 3:
         return ExperimentScreen(

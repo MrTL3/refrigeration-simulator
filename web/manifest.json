@@ -1,12 +1,12 @@
 {
-    "name": "frigolab",
-    "short_name": "frigolab",
+    "name": "FrigoLab — Simulador de Refrigeración Industrial",
+    "short_name": "FrigoLab",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0B1120",
+    "theme_color": "#0284C7",
+    "description": "Simulador interactivo de instalaciones frigoríficas industriales en tiempo real con física termodinámica y telemetría SCADA.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
