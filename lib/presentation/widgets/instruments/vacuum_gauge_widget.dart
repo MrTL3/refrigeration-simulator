@@ -45,10 +45,14 @@ class VacuumGaugeWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.speed, color: ScadaColors.cyanAccent, size: 18),
                   SizedBox(width: 6),
@@ -120,8 +124,11 @@ class VacuumGaugeWidget extends StatelessWidget {
           const SizedBox(height: 8),
 
           // Control de la bomba de vacío (conectar/desconectar para prueba de retención)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
               Text(
                 isPumpOn ? 'Bomba conectada y aspirando' : 'Bomba aislada (Prueba de estanqueidad)',

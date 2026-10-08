@@ -55,13 +55,15 @@ class _ExperimentScreenState extends State<ExperimentScreen> {
                       children: [
                         Icon(Icons.science, color: ScadaColors.infoBlue, size: 24),
                         SizedBox(width: 10),
-                        Text(
-                          'LABORATORIO DE EXPERIMENTOS VIRTUALES',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.0,
-                            color: ScadaColors.textPrimary,
+                        Expanded(
+                          child: Text(
+                            'LABORATORIO DE EXPERIMENTOS VIRTUALES',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.0,
+                              color: ScadaColors.textPrimary,
+                            ),
                           ),
                         ),
                       ],
@@ -104,8 +106,11 @@ class _ExperimentScreenState extends State<ExperimentScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
                             children: [
                               Text(
                                 exp.title,
@@ -264,9 +269,11 @@ class _ExperimentScreenState extends State<ExperimentScreen> {
                     children: [
                       const Icon(Icons.autorenew, size: 16, color: ScadaColors.runningGreen),
                       const SizedBox(width: 8),
-                      Text(
-                        'PERTURBACIÓN APLICADA: ${exp.parameterName} = ${exp.perturbedValue.toInt()} ${exp.unitSymbol}',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ScadaColors.runningGreen),
+                      Expanded(
+                        child: Text(
+                          'PERTURBACIÓN APLICADA: ${exp.parameterName} = ${exp.perturbedValue.toInt()} ${exp.unitSymbol}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ScadaColors.runningGreen),
+                        ),
                       ),
                     ],
                   ),

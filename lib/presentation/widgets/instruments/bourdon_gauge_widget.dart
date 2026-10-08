@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../../../simulation/thermodynamics/r134a_model.dart';
 import '../../theme/scada_colors.dart';
 
 enum GaugeType {
@@ -14,16 +13,20 @@ enum GaugeType {
   const GaugeType(this.title, this.accentColor, this.minBar, this.maxBar);
 }
 
-/// Manómetro analógico Bourdon industrial con glicerina y escala de temperatura de saturación para R-134a.
+/// Manómetro analógico Bourdon industrial con glicerina y escala de temperatura de saturación.
+/// Cumple con la regla de consumir exclusivamente variables calculadas desde SimulationState
+/// sin recalcular modelos termodinámicos dentro de la capa visual de UI.
 class BourdonGaugeWidget extends StatefulWidget {
   final GaugeType type;
   final double measuredPressureBar;
+  final double? saturationTemperatureCelsius;
   final double size;
 
   const BourdonGaugeWidget({
     super.key,
     required this.type,
     required this.measuredPressureBar,
+    this.saturationTemperatureCelsius,
     this.size = 180.0,
   });
 
@@ -33,7 +36,6 @@ class BourdonGaugeWidget extends StatefulWidget {
 
 class _BourdonGaugeWidgetState extends State<BourdonGaugeWidget> with SingleTickerProviderStateMixin {
   late double _displayedPressureBar;
-  final _refrigerant = R134aModel();
 
   @override
   void initState() {
@@ -69,7 +71,7 @@ class _BourdonGaugeWidgetState extends State<BourdonGaugeWidget> with SingleTick
         painter: _BourdonGaugePainter(
           type: widget.type,
           pressureBar: _displayedPressureBar,
-          refrigerant: _refrigerant,
+          saturationTemperatureCelsius: widget.saturationTemperatureCelsius,
         ),
       ),
     );
@@ -79,12 +81,12 @@ class _BourdonGaugeWidgetState extends State<BourdonGaugeWidget> with SingleTick
 class _BourdonGaugePainter extends CustomPainter {
   final GaugeType type;
   final double pressureBar;
-  final R134aModel refrigerant;
+  final double? saturationTemperatureCelsius;
 
   _BourdonGaugePainter({
     required this.type,
     required this.pressureBar,
-    required this.refrigerant,
+    this.saturationTemperatureCelsius,
   });
 
   @override
@@ -167,11 +169,8 @@ class _BourdonGaugePainter extends CustomPainter {
     canvas.drawCircle(Offset(cx, cy), 6.0, Paint()..color = const Color(0xFF1E293B));
     canvas.drawCircle(Offset(cx, cy), 3.0, Paint()..color = const Color(0xFFCBD5E1));
 
-    // 5. Etiqueta digital central: Presión exacta y Tsat equivalente
-    double tSatC = 0.0;
-    if (pressureBar > 0.3) {
-      tSatC = refrigerant.saturationTemperature(pressureBar * 1e5) - 273.15;
-    }
+    // 5. Etiqueta digital central: Presión exacta y Tsat calculada por el solver
+    final tSatC = saturationTemperatureCelsius ?? 0.0;
 
     final readText = TextPainter(
       text: TextSpan(

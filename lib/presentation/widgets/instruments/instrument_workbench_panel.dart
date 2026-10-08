@@ -105,6 +105,7 @@ class _InstrumentWorkbenchPanelState extends State<InstrumentWorkbenchPanel> {
                     BourdonGaugeWidget(
                       type: GaugeType.lowPressure,
                       measuredPressureBar: pEvapBar,
+                      saturationTemperatureCelsius: state.evaporatingTemperatureK - 273.15,
                       size: gaugeSize,
                     ),
                   ],
@@ -117,6 +118,7 @@ class _InstrumentWorkbenchPanelState extends State<InstrumentWorkbenchPanel> {
                     BourdonGaugeWidget(
                       type: GaugeType.highPressure,
                       measuredPressureBar: pCondBar,
+                      saturationTemperatureCelsius: state.condensingTemperatureK - 273.15,
                       size: gaugeSize,
                     ),
                   ],

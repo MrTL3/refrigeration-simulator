@@ -59,10 +59,9 @@ class TelemetryDashboard extends StatelessWidget {
                       letterSpacing: 1.1,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  _buildModeBadge(),
                 ],
               ),
+              _buildModeBadge(),
               ElevatedButton.icon(
                 onPressed: onExplainPressed,
                 style: ElevatedButton.styleFrom(

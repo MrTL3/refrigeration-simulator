@@ -43,6 +43,7 @@ class VisualLayerToggles {
   final bool showPressureMap;
   final bool showTemperatureMap;
   final bool showElectricalVectors;
+  final bool showInstruments;
 
   const VisualLayerToggles({
     this.showRefrigerantFlow = true,
@@ -50,6 +51,7 @@ class VisualLayerToggles {
     this.showPressureMap = false,
     this.showTemperatureMap = false,
     this.showElectricalVectors = false,
+    this.showInstruments = true,
   });
 
   bool get showFlow => showRefrigerantFlow;
@@ -63,6 +65,7 @@ class VisualLayerToggles {
     bool? showPressureMap,
     bool? showTemperatureMap,
     bool? showElectricalVectors,
+    bool? showInstruments,
     bool? showFlow,
     bool? showHeatExchange,
     bool? showPressureZones,
@@ -74,6 +77,7 @@ class VisualLayerToggles {
       showPressureMap: showPressureZones ?? showPressureMap ?? this.showPressureMap,
       showTemperatureMap: showTemperatures ?? showTemperatureMap ?? this.showTemperatureMap,
       showElectricalVectors: showElectricalVectors ?? this.showElectricalVectors,
+      showInstruments: showInstruments ?? this.showInstruments,
     );
   }
 }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../core/units/pressure_unit.dart';
 import '../../education/lessons/progress_tracker.dart';
 import '../../simulation/engine/simulation_engine.dart';
+import '../../state/session_coordinator.dart';
+import '../../state/workshop_state.dart';
 import '../../workshop/assembly_models.dart';
 import '../theme/scada_colors.dart';
 
@@ -9,11 +11,13 @@ import '../theme/scada_colors.dart';
 class WorkshopScreen extends StatefulWidget {
   final SimulationEngine engine;
   final PressureUnit pressureUnit;
+  final SessionCoordinator? coordinator;
 
   const WorkshopScreen({
     super.key,
     required this.engine,
     required this.pressureUnit,
+    this.coordinator,
   });
 
   @override
@@ -36,6 +40,56 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   bool _vacuumCompleted = false;
   double _chargedMassGrams = 0.0;
   bool _chargingCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.coordinator != null) {
+      widget.coordinator!.addListener(_syncFromCoordinator);
+      _syncFromCoordinator();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.coordinator?.removeListener(_syncFromCoordinator);
+    super.dispose();
+  }
+
+  void _syncFromCoordinator() {
+    if (widget.coordinator == null) return;
+    final ws = widget.coordinator!.workshopState;
+    setState(() {
+      _currentStep = ws.currentStep;
+      _connections.clear();
+      _connections.addAll(ws.connections);
+      _leakTestPassed = ws.leakTestPassed;
+      _vacuumPumpRunning = ws.vacuumPumpRunning;
+      _vacuumMicrons = ws.vacuumMicrons;
+      _vacuumCompleted = ws.vacuumCompleted;
+      _chargedMassGrams = ws.chargedMassGrams;
+      _chargingCompleted = ws.chargingCompleted;
+      _hintsRevealed = ws.hintsRevealed;
+      _lastValidationFeedback = ws.lastValidationFeedback;
+      _lastValidationRule = ws.lastValidationRule;
+      _lastAttemptFailed = ws.lastAttemptFailed;
+    });
+  }
+
+  WorkshopState get _currentWorkshopState => WorkshopState(
+        currentStep: _currentStep,
+        connections: Set<WorkshopPipeConnection>.from(_connections),
+        leakTestPassed: _leakTestPassed,
+        vacuumPumpRunning: _vacuumPumpRunning,
+        vacuumMicrons: _vacuumMicrons,
+        vacuumCompleted: _vacuumCompleted,
+        chargedMassGrams: _chargedMassGrams,
+        chargingCompleted: _chargingCompleted,
+        hintsRevealed: _hintsRevealed,
+        lastValidationFeedback: _lastValidationFeedback,
+        lastValidationRule: _lastValidationRule,
+        lastAttemptFailed: _lastAttemptFailed,
+      );
 
   final List<WorkshopPort> _allPorts = const [
     WorkshopPort(id: 'comp_in', componentId: 'comp', label: 'Compresor: Entrada (Aspiración)', type: WorkshopPortType.inlet, pressureLevel: PortPressureLevel.low),
@@ -73,18 +127,31 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     if (result.isValid) {
       final outP = from.type == WorkshopPortType.outlet ? from : to;
       final inP = from.type == WorkshopPortType.inlet ? from : to;
+      final newConn = WorkshopPipeConnection(
+        fromPortId: outP.id,
+        toPortId: inP.id,
+        label: '${outP.label} -> ${inP.label}',
+      );
+
+      final updatedConnections = Set<WorkshopPipeConnection>.from(_connections)..add(newConn);
 
       setState(() {
-        _connections.add(WorkshopPipeConnection(
-          fromPortId: outP.id,
-          toPortId: inP.id,
-          label: '${outP.label} -> ${inP.label}',
-        ));
+        _connections.add(newConn);
         _selectedPort = null;
         _lastValidationFeedback = result.feedback;
         _lastValidationRule = result.rule;
         _lastAttemptFailed = false;
       });
+
+      widget.coordinator?.updateWorkshopState(
+        _currentWorkshopState.copyWith(
+          connections: updatedConnections,
+          lastValidationFeedback: result.feedback,
+          lastValidationRule: result.rule,
+          lastAttemptFailed: false,
+        ),
+        actionDescription: 'Conectar tubería: ${outP.id} -> ${inP.id}',
+      );
     } else {
       setState(() {
         _selectedPort = null;
@@ -95,18 +162,31 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     }
   }
 
+  void _setStep(CommissioningStep step) {
+    setState(() => _currentStep = step);
+    widget.coordinator?.updateWorkshopState(
+      _currentWorkshopState.copyWith(currentStep: step),
+      actionDescription: 'Avanzar a etapa: ${step.title}',
+    );
+  }
+
   void _autoCompleteCircuit() {
+    final fullyConnected = WorkshopState.fullyConnected().connections;
     setState(() {
       _connections.clear();
-      _connections.addAll(const [
-        WorkshopPipeConnection(fromPortId: 'comp_out', toPortId: 'cond_in', label: 'Descarga: Compresor -> Condensador'),
-        WorkshopPipeConnection(fromPortId: 'cond_out', toPortId: 'exp_in', label: 'Línea Líquido: Condensador -> TXV'),
-        WorkshopPipeConnection(fromPortId: 'exp_out', toPortId: 'evap_in', label: 'Inyección: TXV -> Evaporador'),
-        WorkshopPipeConnection(fromPortId: 'evap_out', toPortId: 'comp_in', label: 'Aspiración: Evaporador -> Compresor'),
-      ]);
+      _connections.addAll(fullyConnected);
       _lastValidationFeedback = 'Solución razonada aplicada: El ciclo cerrado estándar de 1 etapa ha sido conectado correctamente.';
       _lastAttemptFailed = false;
     });
+
+    widget.coordinator?.updateWorkshopState(
+      _currentWorkshopState.copyWith(
+        connections: fullyConnected,
+        lastValidationFeedback: 'Solución razonada aplicada: El ciclo cerrado estándar de 1 etapa ha sido conectado correctamente.',
+        lastAttemptFailed: false,
+      ),
+      actionDescription: 'Completar circuito frigorífico estándar',
+    );
   }
 
   void _clearConnections() {
@@ -123,6 +203,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       _chargedMassGrams = 0.0;
       _chargingCompleted = false;
     });
+
+    widget.coordinator?.updateWorkshopState(
+      WorkshopState.initial(),
+      actionDescription: 'Limpiar banco de trabajo de taller',
+    );
   }
 
   void _revealNextHint() {
@@ -209,7 +294,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                 // Solo se puede avanzar si se cumplen los requisitos del paso anterior
                 if (step.index <= _currentStep.index ||
                     (_currentStep == CommissioningStep.assembly && _isCircuitFullyConnected)) {
-                  setState(() => _currentStep = step);
+                  _setStep(step);
                 }
               },
               borderRadius: BorderRadius.circular(8),
@@ -334,14 +419,20 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
                 children: [
                   Text(
                     'TUBERÍAS CONECTADAS: ${_connections.length} / 4',
                     style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ScadaColors.textPrimary),
                   ),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
+                    runSpacing: 4,
                     children: [
                       TextButton.icon(
                         onPressed: _revealNextHint,
@@ -428,7 +519,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         // Botón para avanzar a la siguiente etapa de prueba de fugas
         ElevatedButton.icon(
           onPressed: _isCircuitFullyConnected
-              ? () => setState(() => _currentStep = CommissioningStep.leakTest)
+              ? () => _setStep(CommissioningStep.leakTest)
               : null,
           icon: const Icon(Icons.arrow_forward, size: 16),
           label: Text(
@@ -511,8 +602,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: _leakTestPassed ? ScadaColors.runningGreen : ScadaColors.border),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -534,6 +628,10 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                       ? null
                       : () {
                           setState(() => _leakTestPassed = true);
+                          widget.coordinator?.updateWorkshopState(
+                            _currentWorkshopState.copyWith(leakTestPassed: true),
+                            actionDescription: 'Prueba de estanqueidad N2 verificada (15 bar)',
+                          );
                         },
                   icon: const Icon(Icons.speed, size: 16),
                   label: Text(_leakTestPassed ? 'ESTANQUEIDAD VERIFICADA' : 'PRESURIZAR CON NITRÓGENO'),
@@ -548,7 +646,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           const SizedBox(height: 14),
           ElevatedButton.icon(
             onPressed: _leakTestPassed
-                ? () => setState(() => _currentStep = CommissioningStep.vacuum)
+                ? () => _setStep(CommissioningStep.vacuum)
                 : null,
             icon: const Icon(Icons.arrow_forward, size: 16),
             label: const Text('PURGAR NITRÓGENO Y PASAR A PROCESO DE VACÍO'),
@@ -599,8 +697,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
             ),
             child: Column(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -626,6 +727,14 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                 _vacuumMicrons = 280.0; // Desciende por debajo de 500 micras
                                 _vacuumCompleted = true;
                               });
+                              widget.coordinator?.updateWorkshopState(
+                                _currentWorkshopState.copyWith(
+                                  vacuumPumpRunning: true,
+                                  vacuumMicrons: 280.0,
+                                  vacuumCompleted: true,
+                                ),
+                                actionDescription: 'Vacío profundo conseguido (<500 µm)',
+                              );
                             },
                       icon: Icon(_vacuumPumpRunning ? Icons.hourglass_bottom : Icons.power_settings_new, size: 16),
                       label: Text(_vacuumCompleted ? 'VACÍO CONSEGUIDO (<500 µm)' : 'ENCENDER BOMBA DE VACÍO'),
@@ -642,7 +751,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           const SizedBox(height: 14),
           ElevatedButton.icon(
             onPressed: _vacuumCompleted
-                ? () => setState(() => _currentStep = CommissioningStep.charging)
+                ? () => _setStep(CommissioningStep.charging)
                 : null,
             icon: const Icon(Icons.arrow_forward, size: 16),
             label: const Text('CERRAR VÁLVULAS DE VACÍO Y PASAR A CARGA DE GAS'),
@@ -691,8 +800,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: _chargingCompleted ? ScadaColors.runningGreen : ScadaColors.border),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -717,6 +829,13 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                             _chargedMassGrams = 250.0;
                             _chargingCompleted = true;
                           });
+                          widget.coordinator?.updateWorkshopState(
+                            _currentWorkshopState.copyWith(
+                              chargedMassGrams: 250.0,
+                              chargingCompleted: true,
+                            ),
+                            actionDescription: 'Carga de gas R-134a completada (250 g)',
+                          );
                         },
                   icon: const Icon(Icons.local_gas_station, size: 16),
                   label: Text(_chargingCompleted ? 'CARGA COMPLETA (250 g)' : 'INICIAR CARGA DE REFRIGERANTE'),
@@ -731,7 +850,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           const SizedBox(height: 14),
           ElevatedButton.icon(
             onPressed: _chargingCompleted
-                ? () => setState(() => _currentStep = CommissioningStep.startup)
+                ? () => _setStep(CommissioningStep.startup)
                 : null,
             icon: const Icon(Icons.arrow_forward, size: 16),
             label: const Text('RETIRAR MANGUERAS Y PASAR A PUESTA EN MARCHA'),
@@ -776,7 +895,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
             style: TextStyle(fontSize: 12, color: ScadaColors.textPrimary, height: 1.3),
           ),
           const SizedBox(height: 14),
-          Row(
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
             children: [
               ElevatedButton.icon(
                 onPressed: () {
@@ -796,7 +917,6 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
               ),
-              const SizedBox(width: 12),
               OutlinedButton.icon(
                 onPressed: _clearConnections,
                 icon: const Icon(Icons.restart_alt, size: 18),

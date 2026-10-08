@@ -31,10 +31,41 @@ class SimulationEngine extends ChangeNotifier {
   bool get isRunning => _state.isRunning;
   EducationalExperiment? get activeExperiment => _activeExperiment;
 
+  /// Notificador previo a la mutación causada por una acción de usuario
+  void Function(String description)? onUserAction;
+
+  void notifyUserAction(String description) {
+    onUserAction?.call(description);
+  }
+
+  /// Restaura un estado previo exacto procedente de un Snapshot de Undo/Redo.
+  /// NO altera ecuaciones ni parámetros físicos. Reanuda o pausa el bucle temporal según corresponda.
+  void restoreState(SimulationState restoredState, {EducationalExperiment? activeExperiment}) {
+    _ticker?.cancel();
+    _ticker = null;
+    _state = restoredState;
+    _activeExperiment = activeExperiment;
+
+    // Asentamiento instantáneo de estados a dt = 0.0 sin avanzar tiempo
+    _state = DynamicSolver.integrateStep(
+      currentState: _state,
+      dt: 0.0,
+    );
+
+    if (restoredState.isRunning) {
+      _ticker = Timer.periodic(
+        const Duration(milliseconds: 50),
+        (_) => _onTick(),
+      );
+    }
+    notifyListeners();
+  }
+
   /// Arranca la simulación física continua
   void start() {
     if (_state.isRunning) return;
 
+    notifyUserAction('Arrancar instalación frigorífica');
     _state = _state.copyWith(isRunning: true);
     _ticker?.cancel();
     _ticker = Timer.periodic(
@@ -48,6 +79,7 @@ class SimulationEngine extends ChangeNotifier {
   void pause() {
     if (!_state.isRunning) return;
 
+    notifyUserAction('Parar instalación frigorífica');
     _ticker?.cancel();
     _ticker = null;
     _state = _state.copyWith(isRunning: false);
@@ -87,6 +119,7 @@ class SimulationEngine extends ChangeNotifier {
   void setCompressorRpm(double rpm) {
     final comp = _state.circuit.compressor;
     if (comp == null) return;
+    notifyUserAction('Ajustar RPM compresor a ${rpm.toInt()} RPM');
     final updatedComp = comp.copyWith(rpm: rpm.clamp(500.0, 4500.0));
     _updateComponentInCircuit(updatedComp);
   }
@@ -94,6 +127,7 @@ class SimulationEngine extends ChangeNotifier {
   void setValveOpening(double percent) {
     final exp = _state.circuit.expansionDevice;
     if (exp == null) return;
+    notifyUserAction('Ajustar apertura TXV a ${percent.toStringAsFixed(0)}%');
     final updatedExp = exp.copyWith(openingPercent: percent.clamp(5.0, 100.0));
     _updateComponentInCircuit(updatedExp);
   }
@@ -101,6 +135,7 @@ class SimulationEngine extends ChangeNotifier {
   void setTxvAutomatic(bool automatic) {
     final exp = _state.circuit.expansionDevice;
     if (exp == null) return;
+    notifyUserAction(automatic ? 'Activar modo automático TXV' : 'Activar modo manual TXV');
     final updatedExp = exp.copyWith(isAutomatic: automatic);
     _updateComponentInCircuit(updatedExp);
   }
@@ -108,6 +143,7 @@ class SimulationEngine extends ChangeNotifier {
   void setAmbientTemperature(double tempKelvin) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
+    notifyUserAction('Ajustar temp. ambiente a ${(tempKelvin - 273.15).toStringAsFixed(0)} °C');
     final updatedCond = cond.copyWith(ambientTemperatureKelvin: tempKelvin);
     _updateComponentInCircuit(updatedCond);
   }
@@ -115,6 +151,7 @@ class SimulationEngine extends ChangeNotifier {
   void setTxvOpening(double percent) => setValveOpening(percent);
 
   void setRoomTemperature(double tempKelvin) {
+    notifyUserAction('Ajustar temp. cámara a ${(tempKelvin - 273.15).toStringAsFixed(0)} °C');
     final updatedColdRoom = _state.coldRoom.copyWith(temperatureKelvin: tempKelvin);
     _state = _state.copyWith(coldRoom: updatedColdRoom);
     notifyListeners();
@@ -125,6 +162,7 @@ class SimulationEngine extends ChangeNotifier {
   void toggleCondenserFan(bool operational) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
+    notifyUserAction(operational ? 'Encender ventilador condensador' : 'Apagar ventilador condensador');
     final updatedCond = cond.copyWith(fanOperational: operational);
     _updateComponentInCircuit(updatedCond);
     _state = _state.copyWith(condenserFanSpeedOverride: operational ? 1.0 : 0.0);
@@ -134,6 +172,7 @@ class SimulationEngine extends ChangeNotifier {
   void toggleEvaporatorFan(bool operational) {
     final evap = _state.circuit.evaporator;
     if (evap == null) return;
+    notifyUserAction(operational ? 'Encender ventilador evaporador' : 'Apagar ventilador evaporador');
     final updatedEvap = evap.copyWith(fanOperational: operational);
     _updateComponentInCircuit(updatedEvap);
     _state = _state.copyWith(evaporatorFanSpeedOverride: operational ? 1.0 : 0.0);
@@ -159,6 +198,7 @@ class SimulationEngine extends ChangeNotifier {
   void setCondenserFouling(double fouling) {
     final cond = _state.circuit.condenser;
     if (cond == null) return;
+    notifyUserAction('Ajustar suciedad condensador a ${(fouling * 100).toInt()}%');
     final updatedCond = cond.copyWith(foulingFactor: fouling.clamp(0.0, 1.0));
     _updateComponentInCircuit(updatedCond);
   }
@@ -166,12 +206,14 @@ class SimulationEngine extends ChangeNotifier {
   // --- Control Termostático y Carga Térmica ---
 
   void setThermostatEnabled(bool enabled) {
+    notifyUserAction(enabled ? 'Habilitar control termostático' : 'Deshabilitar control termostático');
     final updated = _state.thermostat.copyWith(isEnabled: enabled);
     _state = _state.copyWith(thermostat: updated);
     notifyListeners();
   }
 
   void setThermostatSetpoint(double setpointCelsius) {
+    notifyUserAction('Ajustar setpoint termostato a ${setpointCelsius.toStringAsFixed(1)} °C');
     final updated = _state.thermostat.copyWith(setpointCelsius: setpointCelsius);
     _state = _state.copyWith(thermostat: updated);
     notifyListeners();
@@ -184,6 +226,7 @@ class SimulationEngine extends ChangeNotifier {
   }
 
   void setInternalHeatLoad(double watts) {
+    notifyUserAction('Ajustar carga interna cámara a ${watts.toInt()} W');
     final updated = _state.coldRoom.copyWith(internalHeatLoadWatts: watts.clamp(0.0, 10000.0));
     _state = _state.copyWith(coldRoom: updated);
     notifyListeners();

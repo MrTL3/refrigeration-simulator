@@ -30,10 +30,14 @@ class ClampMeterWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.electrical_services, color: ScadaColors.warningAmber, size: 18),
                   SizedBox(width: 6),

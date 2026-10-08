@@ -385,8 +385,11 @@ class _LearnScreenState extends State<LearnScreen> {
         const SizedBox(height: 14),
 
         // Barra de acciones inferiores
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             OutlinedButton.icon(
               onPressed: () {
